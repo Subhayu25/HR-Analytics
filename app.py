@@ -8,10 +8,8 @@ Version : 2025-07-03  (stable)
 
 # ───────────────────────── Imports ──────────────────────────
 import warnings, base64
-from pathlib import Path
 from typing import List, Tuple, Dict, Union
 
-import os
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -42,7 +40,11 @@ st.set_page_config(page_title="HR Analytics Dashboard",
                    page_icon=":bar_chart:", layout="wide")
 
 # ────────────────────── Constants ───────────────────────────
-GITHUB_URL            = "https://raw.githubusercontent.com/your-username/your-repo/main/HR Analytics.csv"
+# Replace <your-username>,<your-repo> and ensure spaces are percent-encoded
+GITHUB_URL            = (
+    "https://raw.githubusercontent.com/your-username/your-repo/"
+    "main/HR%20Analytics.csv"
+)
 TARGET_CLASSIFICATION = "Attrition"
 DEFAULT_REG_TARGET    = "MonthlyIncome"
 RANDOM_STATE          = 42
@@ -50,7 +52,6 @@ RANDOM_STATE          = 42
 # ────────────────────── Helpers ─────────────────────────────
 @st.cache_data
 def load_data() -> pd.DataFrame:
-    """Load data directly from GitHub raw URL."""
     df = pd.read_csv(GITHUB_URL)
     if TARGET_CLASSIFICATION in df.columns:
         df[TARGET_CLASSIFICATION] = df[TARGET_CLASSIFICATION].astype("category")
@@ -62,7 +63,6 @@ def get_column_types(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
     return numeric, categorical
 
 def universal_filters(df: pd.DataFrame) -> pd.DataFrame:
-    """Sidebar widgets that filter the DataFrame."""
     st.sidebar.markdown("### Universal Filters")
     numeric, categorical = get_column_types(df)
     df_filt = df.copy()
@@ -85,7 +85,6 @@ def universal_filters(df: pd.DataFrame) -> pd.DataFrame:
     return df_filt
 
 def download_link(obj, filename: str, label: str) -> str:
-    """Return a base-64 download link."""
     text = obj.to_csv(index=False) if isinstance(obj, pd.DataFrame) else obj
     b64  = base64.b64encode(text.encode()).decode()
     return f'<a href="data:file/txt;base64,{b64}" download="{filename}">{label}</a>'
@@ -218,7 +217,7 @@ def tab_classification(df: pd.DataFrame) -> None:
                      title=f"Feature Importance: {feat_mdl}")
     st.plotly_chart(fig_imp, use_container_width=True)
 
-    # Confusion matrix
+    # Confusion matrix & ROC
     mdl = st.selectbox("Confusion-matrix model", list(res))
     y_true = res[mdl]["y_test"]
     y_pred = res[mdl]["pipe"].predict(X.iloc[y_true.index])
@@ -227,7 +226,6 @@ def tab_classification(df: pd.DataFrame) -> None:
                               x=["No","Yes"], y=["No","Yes"]),
                     use_container_width=False)
 
-    # ROC curves
     roc_fig = go.Figure()
     for n, r in res.items():
         fpr, tpr, _ = roc_curve(r["y_test"].map({"No":0,"Yes":1}), r["proba"])
@@ -239,12 +237,10 @@ def tab_classification(df: pd.DataFrame) -> None:
                           yaxis_title="TPR")
     st.plotly_chart(roc_fig, use_container_width=True)
 
-    # Batch prediction
-    st.subheader("🔮 Batch Prediction")
+    # Batch prediction (uses full df)
     best_pipe = max(res.items(), key=lambda kv: kv[1]["test"]["f1"])[1]["pipe"]
-    df_new = best_pipe.named_steps['prep'].inverse_transform(best_pipe.named_steps['prep'].transform(df.drop(columns=[TARGET_CLASSIFICATION])))
-    # Note: if you need CSV input, re-enable uploader here
     df["PredictedAttrition"] = best_pipe.predict(df.drop(columns=[TARGET_CLASSIFICATION]))
+    st.subheader("🔮 Batch Prediction (entire dataset)")
     st.dataframe(df.head(), use_container_width=True)
     st.download_button("Download predictions",
                        df.to_csv(index=False).encode(),
@@ -256,30 +252,28 @@ def tab_clustering(df: pd.DataFrame) -> None:
     numeric, _ = get_column_types(df)
     X_scaled  = StandardScaler().fit_transform(df[numeric].dropna())
 
-    # Elbow method
     inertias = [KMeans(k, n_init="auto", random_state=RANDOM_STATE)
                 .fit(X_scaled).inertia_ for k in range(1,11)]
     st.plotly_chart(px.line(x=range(1,11), y=inertias, markers=True,
                             labels={"x":"k","y":"Inertia"},
                             title="Elbow Method"), use_container_width=True)
 
-    # Silhouette analysis
     st.subheader("Silhouette Score for Optimal Clusters")
-    sil_range = st.slider("Select range for number of clusters (k)", 2, 10, (2, 6))
+    sil_range = st.slider("Select k-range", 2, 10, (2, 6))
     silhouette_scores = []
     k_range = range(sil_range[0], sil_range[1] + 1)
     for k in k_range:
         labels_tmp = KMeans(k, n_init="auto", random_state=RANDOM_STATE).fit_predict(X_scaled)
         silhouette_scores.append(silhouette_score(X_scaled, labels_tmp))
-    sil_fig = px.line(x=list(k_range), y=silhouette_scores, markers=True,
-                      labels={"x":"k","y":"Silhouette Score"},
-                      title="Silhouette Score vs k")
-    st.plotly_chart(sil_fig, use_container_width=True)
+    st.plotly_chart(px.line(
+        x=list(k_range), y=silhouette_scores, markers=True,
+        labels={"x":"k","y":"Silhouette Score"},
+        title="Silhouette Score vs k"
+    ), use_container_width=True)
     best_k = k_range[np.argmax(silhouette_scores)]
-    st.markdown(f"**Best k in range:** {best_k} (Silhouette Score = {np.max(silhouette_scores):.3f})")
+    st.markdown(f"**Best k:** {best_k} (Score={np.max(silhouette_scores):.3f})")
 
-    # Final clustering
-    k = st.slider("Choose k for final clustering", 2, 10, best_k)
+    k = st.slider("Choose final k", 2, 10, best_k)
     km = KMeans(k, n_init="auto", random_state=RANDOM_STATE).fit(X_scaled)
     df["cluster"] = km.labels_
     persona = df.groupby("cluster").agg(
@@ -307,8 +301,7 @@ def tab_association(df: pd.DataFrame) -> None:
                               metric="confidence", min_threshold=conf)
     rules = rules[rules["lift"]>=lift]\
             .sort_values("confidence", ascending=False).head(10)
-    st.dataframe(rules[["antecedents","consequents",
-                        "support","confidence","lift"]])
+    st.dataframe(rules[["antecedents","consequents","support","confidence","lift"]])
     st.plotly_chart(px.bar(rules, x=rules.index.astype(str), y="lift",
                            title="Lift of Top-10 Rules"),
                     use_container_width=True)
@@ -387,7 +380,6 @@ def tab_retention(df: pd.DataFrame) -> None:
     st.dataframe(tmp[["EmployeeNumber","RetentionProb"]].head(),
                  use_container_width=True)
 
-    # Feature importance
     st.subheader("Feature importance")
     feat_names = pipe["prep"].get_feature_names_out()
     if alg == "Logistic Regression":
@@ -426,8 +418,11 @@ def main() -> None:
     st.sidebar.download_button("Download filtered CSV",
                                df.to_csv(index=False).encode(),
                                "filtered_data.csv", "text/csv")
-    tabs = st.tabs(["Visualization","Classification","Clustering",
-                    "Association Rules","Regression","12-Month Forecast"])
+
+    tabs = st.tabs([
+        "Visualization","Classification","Clustering",
+        "Association Rules","Regression","12-Month Forecast"
+    ])
     with tabs[0]: tab_visualisation(df)
     with tabs[1]: tab_classification(df)
     with tabs[2]: tab_clustering(df)
