@@ -1,414 +1,195 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-HR Analytics Streamlit Dashboard
-Author  : Group-8 — aided by ChatGPT o3
-Version : 2025-07-03  (stable)
-"""
-
-# ───────────────────────── Imports ──────────────────────────
-import warnings, base64
-from pathlib import Path
-from typing import List, Tuple, Dict, Union
-
-import numpy as np
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import shap
 import streamlit as st
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    confusion_matrix, roc_curve,
-)
-from sklearn.neighbors import KNeighborsClassifier
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import plotly.express as px
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.linear_model import LogisticRegression, LinearRegression, Lasso, Ridge
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.linear_model import (
-    LinearRegression, Ridge, Lasso, LogisticRegression,
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    confusion_matrix, roc_auc_score, r2_score, mean_squared_error, silhouette_score
 )
 from sklearn.cluster import KMeans
-from mlxtend.frequent_patterns import apriori, association_rules
-import xgboost as xgb
+from sklearn.inspection import permutation_importance
 
-warnings.filterwarnings("ignore", category=FutureWarning)
-st.set_page_config(page_title="HR Analytics Dashboard",
-                   page_icon=":bar_chart:", layout="wide")
+st.set_page_config(
+    layout="wide",
+    page_title="HR Analytics Dashboard",
+    page_icon="📊"
+)
 
-# ────────────────────── Constants ───────────────────────────
-DATA_PATH             = Path(__file__).with_name("HR Analytics.csv")
-TARGET_CLASSIFICATION = "Attrition"
-DEFAULT_REG_TARGET    = "MonthlyIncome"
-RANDOM_STATE          = 42
+st.title("💼 HR Analytics Dashboard")
 
-# ────────────────────── Helpers ─────────────────────────────
+# ----------- DATA LOADING -----------
 @st.cache_data
-def load_data(uploaded: Union[str, Path, None] = None) -> pd.DataFrame:
-    """Load bundled sample or user-uploaded CSV."""
-    df = pd.read_csv(uploaded) if uploaded else pd.read_csv(DATA_PATH)
-    if TARGET_CLASSIFICATION in df.columns:
-        df[TARGET_CLASSIFICATION] = df[TARGET_CLASSIFICATION].astype("category")
+def load_data():
+    # You can change this line to load from your own file
+    df = pd.read_excel("Hr Analytics__.xlsx")
     return df
 
+df = load_data()
+st.sidebar.header("🔧 Data Preview & Info")
+if st.sidebar.checkbox("Show Raw Data"):
+    st.dataframe(df)
 
-def get_column_types(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
-    numeric     = df.select_dtypes(include="number").columns.tolist()
-    categorical = [c for c in df.columns if c not in numeric]
-    return numeric, categorical
+# ----------- DATA PREP -----------
+# Label encoding & feature setup
+df_clean = df.copy()
+for col in df_clean.select_dtypes(include="object"):
+    df_clean[col] = LabelEncoder().fit_transform(df_clean[col].astype(str))
 
+# Drop rows with missing target if exists
+if 'Attrition' in df_clean.columns:
+    df_clean = df_clean.dropna(subset=['Attrition'])
 
-def universal_filters(df: pd.DataFrame) -> pd.DataFrame:
-    """Sidebar widgets that filter the DataFrame."""
-    st.sidebar.markdown("### Universal Filters")
-    numeric, categorical = get_column_types(df)
-    df_filt = df.copy()
+# Set up features and targets
+feature_cols = [col for col in df_clean.columns if col != 'Attrition']
+target_col = 'Attrition' if 'Attrition' in df_clean.columns else df_clean.columns[-1]
+X = df_clean[feature_cols]
+y = df_clean[target_col]
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 
-    # Numeric range sliders (skip constants)
-    with st.sidebar.expander("Numeric Ranges"):
-        for col in numeric:
-            lo, hi = df[col].min(), df[col].max()
-            if lo == hi:
-                st.number_input(col, value=float(lo), disabled=True)
-                continue
-            rng = st.slider(col, float(lo), float(hi),
-                            (float(lo), float(hi)))
-            df_filt = df_filt[(df_filt[col] >= rng[0]) &
-                              (df_filt[col] <= rng[1])]
+# ----------- MAIN TABS -----------
+tab1, tab2, tab3 = st.tabs(["Clustering", "Classification", "Regression"])
 
-    # Categorical multiselects
-    with st.sidebar.expander("Categorical Values"):
-        for col in categorical:
-            opts = df[col].dropna().unique().tolist()
-            sel  = st.multiselect(col, opts, default=opts)
-            df_filt = df_filt[df_filt[col].isin(sel)]
+# ================== CLUSTERING TAB ==================
+with tab1:
+    st.header("🔹 KMeans Clustering & Silhouette Analysis")
+    st.write("Visualize clusters and determine the optimal number of clusters using Silhouette Score.")
 
-    return df_filt
+    # Range selection for clusters
+    range_n_clusters = st.slider("Select range for number of clusters (k):", 2, 10, (2, 6))
 
+    silhouette_scores = []
+    for k in range(range_n_clusters[0], range_n_clusters[1]+1):
+        kmeans = KMeans(n_clusters=k, random_state=42)
+        cluster_labels = kmeans.fit_predict(X_scaled)
+        score = silhouette_score(X_scaled, cluster_labels)
+        silhouette_scores.append(score)
+    fig, ax = plt.subplots()
+    ax.plot(range(range_n_clusters[0], range_n_clusters[1]+1), silhouette_scores, marker='o')
+    ax.set_xlabel('Number of clusters (k)')
+    ax.set_ylabel('Silhouette Score')
+    ax.set_title('Silhouette Score for different k')
+    st.pyplot(fig)
+    best_k = np.argmax(silhouette_scores) + range_n_clusters[0]
+    st.markdown(f"**Best k in range:** {best_k} (Silhouette Score = {np.max(silhouette_scores):.3f})")
 
-def download_link(obj, filename: str, label: str) -> str:
-    """Return a base-64 download link."""
-    text = obj.to_csv(index=False) if isinstance(obj, pd.DataFrame) else obj
-    b64  = base64.b64encode(text.encode()).decode()
-    return f'<a href="data:file/txt;base64,{b64}" download="{filename}">{label}</a>'
+    # Show clusters with best_k
+    kmeans_final = KMeans(n_clusters=best_k, random_state=42)
+    cluster_labels_final = kmeans_final.fit_predict(X_scaled)
+    df_clustered = df.copy()
+    df_clustered['Cluster'] = cluster_labels_final
 
-# ─────────────────── Tab 1 – Visualisation ──────────────────
-def tab_visualisation(df: pd.DataFrame) -> None:
-    st.header("📊 Data Visualisation")
-    numeric, categorical = get_column_types(df)
+    st.write("**Cluster Distribution:**")
+    st.bar_chart(df_clustered['Cluster'].value_counts())
 
-    with st.expander("Attrition % by Department"):
-        perc = (pd.crosstab(df["Department"], df[TARGET_CLASSIFICATION],
-                            normalize="index")*100).reset_index()
-        st.plotly_chart(px.bar(perc, x="Department", y="Yes",
-                               labels={"Yes":"Attrition %"}),
-                        use_container_width=True)
+    if len(feature_cols) >= 2:
+        fig2 = px.scatter(df_clustered, x=feature_cols[0], y=feature_cols[1],
+                          color='Cluster', title="Cluster Scatterplot (first 2 features)")
+        st.plotly_chart(fig2, use_container_width=True)
 
-    with st.expander("Age Distribution"):
-        st.plotly_chart(px.histogram(df, x="Age", color=TARGET_CLASSIFICATION,
-                                     nbins=30, barmode="overlay"),
-                        use_container_width=True)
+# ================== CLASSIFICATION TAB ==================
+with tab2:
+    st.header("🔸 Classification Models & Feature Importance")
 
-    with st.expander("Monthly Income vs Job Level"):
-        st.plotly_chart(px.violin(df, x="JobLevel", y="MonthlyIncome",
-                                  color=TARGET_CLASSIFICATION,
-                                  box=True, points="outliers"),
-                        use_container_width=True)
+    model_option = st.selectbox(
+        "Select classifier for feature importance:",
+        ("KNN", "Decision Tree", "Random Forest", "Gradient Boosting")
+    )
+    st.markdown("The chart below shows which features are most important for the selected model.")
 
-    with st.expander("Correlation Heat-map"):
-        st.plotly_chart(px.imshow(df[numeric].corr(), text_auto=".2f"),
-                        use_container_width=True)
+    # Prepare models and feature importance
+    feature_names = feature_cols
 
-    # Auto extra plots
-    auto = 4
-    for col in categorical[:8]:
-        with st.expander(f"Countplot – {col}"):
-            st.plotly_chart(px.histogram(df, x=col, color=TARGET_CLASSIFICATION,
-                                         barmode="group"),
-                            use_container_width=True)
-            auto += 1
-    for col in numeric[:8]:
-        with st.expander(f"Boxplot – {col} by Attrition"):
-            st.plotly_chart(px.box(df, y=col, color=TARGET_CLASSIFICATION),
-                            use_container_width=True)
-            auto += 1
-    st.success(f"Rendered **{auto}** visual insights.")
+    if model_option == "KNN":
+        model = KNeighborsClassifier(n_neighbors=5)
+        model.fit(X_train, y_train)
+        result = permutation_importance(model, X_test, y_test, n_repeats=10, random_state=42)
+        importances = result.importances_mean
+        title = "Feature Importance (Permutation) - KNN"
+    elif model_option == "Decision Tree":
+        model = DecisionTreeClassifier(random_state=42)
+        model.fit(X_train, y_train)
+        importances = model.feature_importances_
+        title = "Feature Importance - Decision Tree"
+    elif model_option == "Random Forest":
+        model = RandomForestClassifier(random_state=42)
+        model.fit(X_train, y_train)
+        importances = model.feature_importances_
+        title = "Feature Importance - Random Forest"
+    elif model_option == "Gradient Boosting":
+        model = GradientBoostingClassifier(random_state=42)
+        model.fit(X_train, y_train)
+        importances = model.feature_importances_
+        title = "Feature Importance - Gradient Boosting"
 
-# ──────────────── Tab 2 – Classification ───────────────────
-def preprocess(df: pd.DataFrame, target: str):
-    num, cat = get_column_types(df.drop(columns=[target]))
-    X = df.drop(columns=[target])
-    y = df[target]
-    pre = ColumnTransformer([
-        ("num", StandardScaler(), num),
-        ("cat", OneHotEncoder(handle_unknown="ignore"), cat),
-    ])
-    return X, y, pre
+    # Bar chart for feature importance
+    fig_imp, ax_imp = plt.subplots()
+    sorted_idx = np.argsort(importances)
+    ax_imp.barh(np.array(feature_names)[sorted_idx], importances[sorted_idx])
+    ax_imp.set_xlabel("Importance")
+    ax_imp.set_ylabel("Feature")
+    ax_imp.set_title(title)
+    st.pyplot(fig_imp)
 
+    # -- Model performance metrics (optional) --
+    st.subheader("Model Performance Metrics")
+    y_pred = model.predict(X_test)
+    st.write(f"**Accuracy:** {accuracy_score(y_test, y_pred):.3f}")
+    st.write(f"**Precision:** {precision_score(y_test, y_pred, average='weighted'):.3f}")
+    st.write(f"**Recall:** {recall_score(y_test, y_pred, average='weighted'):.3f}")
+    st.write(f"**F1 Score:** {f1_score(y_test, y_pred, average='weighted'):.3f}")
 
-def train_classifiers(X, y, pre) -> Dict[str, Dict]:
-    X_tr, X_te, y_tr, y_te = train_test_split(
-        X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y)
+# ================== REGRESSION TAB ==================
+with tab3:
+    st.header("🔹 Regression Models")
+    st.write("Run and compare regression models for predicting numeric outcomes.")
 
+    # Select a regression target (must be numeric and not the classification label)
+    numeric_cols = df_clean.select_dtypes(include=np.number).columns.tolist()
+    regression_targets = [col for col in numeric_cols if col not in ['Attrition', target_col]]
+    regression_target = st.selectbox("Select Regression Target:", regression_targets)
+
+    X_reg = df_clean.drop(columns=[regression_target, target_col])
+    y_reg = df_clean[regression_target]
+    X_train_reg, X_test_reg, y_train_reg, y_test_reg = train_test_split(
+        X_reg, y_reg, test_size=0.2, random_state=42)
+    
     models = {
-        "KNN": KNeighborsClassifier(),
-        "Decision Tree": DecisionTreeClassifier(random_state=RANDOM_STATE),
-        "Random Forest": RandomForestClassifier(n_estimators=300,
-                                                random_state=RANDOM_STATE),
-        "GBRT": GradientBoostingClassifier(random_state=RANDOM_STATE),
+        "Linear Regression": LinearRegression(),
+        "Lasso Regression": Lasso(),
+        "Ridge Regression": Ridge(),
+        "Decision Tree Regression": DecisionTreeRegressor(random_state=42)
     }
-    out = {}
-    for n, m in models.items():
-        pipe = Pipeline([("prep", pre), ("mdl", m)]).fit(X_tr, y_tr)
-        p_tr, p_te = pipe.predict(X_tr), pipe.predict(X_te)
-        out[n] = {
-            "pipe": pipe,
-            "train": {k: f(y_tr, p_tr, pos_label="Yes", zero_division=0)
-                      if k != "accuracy" else f(y_tr, p_tr)
-                      for k, f in [("accuracy",accuracy_score),
-                                   ("precision",precision_score),
-                                   ("recall",recall_score),
-                                   ("f1",f1_score)]},
-            "test": {k: f(y_te, p_te, pos_label="Yes", zero_division=0)
-                     if k != "accuracy" else f(y_te, p_te)
-                     for k, f in [("accuracy",accuracy_score),
-                                  ("precision",precision_score),
-                                  ("recall",recall_score),
-                                  ("f1",f1_score)]},
-            "proba": pipe.predict_proba(X_te)[:,1],
-            "y_test": y_te,
-        }
-    return out
+    results = {}
 
+    for name, model in models.items():
+        model.fit(X_train_reg, y_train_reg)
+        y_pred_reg = model.predict(X_test_reg)
+        r2 = r2_score(y_test_reg, y_pred_reg)
+        mse = mean_squared_error(y_test_reg, y_pred_reg)
+        results[name] = {"R2": r2, "MSE": mse}
 
-def tab_classification(df: pd.DataFrame) -> None:
-    st.header("🤖 Classification")
-    X, y, pre = preprocess(df, TARGET_CLASSIFICATION)
-    res = train_classifiers(X, y, pre)
+    st.dataframe(pd.DataFrame(results).T.style.format({"R2": "{:.3f}", "MSE": "{:.2f}"}))
 
-    rows = []
-    for n, r in res.items():
-        rows.append([n,
-            *(round(r["train"][m],3) for m in ("accuracy","precision","recall","f1")),
-            *(round(r["test"][m],3)  for m in ("accuracy","precision","recall","f1")),
-        ])
-    cols = pd.MultiIndex.from_product([["Train","Test"],
-                                       ["Accuracy","Precision","Recall","F1"]])
-    st.dataframe(pd.DataFrame(rows, columns=["Model"]+list(cols))
-                 .set_index("Model"), use_container_width=True)
+    # Optional: Plot feature importance for tree regression
+    reg_option = st.selectbox("Show Feature Importance for:", list(models.keys()))
+    if reg_option == "Decision Tree Regression":
+        tree_reg = DecisionTreeRegressor(random_state=42)
+        tree_reg.fit(X_train_reg, y_train_reg)
+        importances_reg = tree_reg.feature_importances_
+        figr, axr = plt.subplots()
+        sorted_idx = np.argsort(importances_reg)
+        axr.barh(np.array(X_reg.columns)[sorted_idx], importances_reg[sorted_idx])
+        axr.set_title("Feature Importance: Decision Tree Regression")
+        st.pyplot(figr)
 
-    mdl = st.selectbox("Confusion-matrix model", list(res))
-    y_true = res[mdl]["y_test"]
-    y_pred = res[mdl]["pipe"].predict(X.iloc[y_true.index])
-    cm = confusion_matrix(y_true, y_pred, labels=["No","Yes"])
-    st.plotly_chart(px.imshow(cm, text_auto=True,
-                              x=["No","Yes"], y=["No","Yes"]),
-                    use_container_width=False)
-
-    roc_fig = go.Figure()
-    for n, r in res.items():
-        fpr, tpr, _ = roc_curve(r["y_test"].map({"No":0,"Yes":1}), r["proba"])
-        roc_fig.add_trace(go.Scatter(x=fpr, y=tpr, mode="lines", name=n))
-    roc_fig.add_shape(type="line", x0=0,x1=1,y0=0,y1=1,
-                      line=dict(dash="dash"))
-    roc_fig.update_layout(title="ROC Curves",
-                          xaxis_title="FPR",
-                          yaxis_title="TPR")
-    st.plotly_chart(roc_fig, use_container_width=True)
-
-    st.subheader("🔮 Batch prediction")
-    up = st.file_uploader("CSV without *Attrition*", type="csv")
-    if up:
-        df_new = pd.read_csv(up)
-        best   = max(res.items(), key=lambda kv: kv[1]["test"]["f1"])[1]["pipe"]
-        df_new["PredictedAttrition"] = best.predict(df_new)
-        st.dataframe(df_new.head(), use_container_width=True)
-        st.download_button("Download predictions",
-                           df_new.to_csv(index=False).encode(),
-                           "predictions.csv", "text/csv")
-
-# ──────────────── Tab 3 – Clustering ────────────────────────
-def tab_clustering(df: pd.DataFrame) -> None:
-    st.header("🕵️‍♀️ Clustering")
-    numeric,_ = get_column_types(df)
-    X_scaled  = StandardScaler().fit_transform(df[numeric].dropna())
-
-    inertias = [KMeans(k, n_init="auto", random_state=RANDOM_STATE)
-                .fit(X_scaled).inertia_ for k in range(1,11)]
-    st.plotly_chart(px.line(x=range(1,11), y=inertias, markers=True,
-                            labels={"x":"k","y":"Inertia"},
-                            title="Elbow Method"),
-                    use_container_width=True)
-
-    k  = st.slider("Choose k", 2,10,3)
-    km = KMeans(k, n_init="auto", random_state=RANDOM_STATE).fit(X_scaled)
-    df["cluster"] = km.labels_
-
-    persona = df.groupby("cluster").agg(
-        {c: ("mean" if c in numeric else "first") for c in df})
-    st.dataframe(persona, use_container_width=True)
-
-    st.markdown(download_link(df, "clustered_data.csv", "📥 Download clusters"),
-                unsafe_allow_html=True)
-
-# ──────────────── Tab 4 – Association Rules ────────────────
-def tab_association(df: pd.DataFrame) -> None:
-    st.header("🔗 Association Rule Mining")
-    cols = st.multiselect("Pick 3 categorical columns",
-                          df.columns.tolist(),
-                          default=["JobRole","MaritalStatus","OverTime"])
-    if len(cols) != 3:
-        st.warning("Exactly three columns required.")
-        return
-
-    sup  = st.slider("min_support",    0.01,0.5,0.05,0.01)
-    conf = st.slider("min_confidence", 0.01,1.0,0.30,0.01)
-    lift = st.slider("min_lift",       0.50,5.0,1.00,0.10)
-
-    hot   = pd.get_dummies(df[cols].astype(str))
-    rules = association_rules(apriori(hot, min_support=sup, use_colnames=True),
-                              metric="confidence", min_threshold=conf)
-    rules = rules[rules["lift"]>=lift]\
-            .sort_values("confidence", ascending=False).head(10)
-    st.dataframe(rules[["antecedents","consequents",
-                        "support","confidence","lift"]])
-    st.plotly_chart(px.bar(rules, x=rules.index.astype(str), y="lift",
-                           title="Lift of Top-10 Rules"),
-                    use_container_width=True)
-
-# ──────────────── Tab 5 – Regression ───────────────────────
-def tab_regression(df: pd.DataFrame) -> None:
-    st.header("📈 Regression Insights")
-    target = st.selectbox("Target variable",
-                          df.select_dtypes("number").columns,
-                          index=df.columns.get_loc(DEFAULT_REG_TARGET))
-    y = df[target]; X = df.drop(columns=[target])
-    num, cat = get_column_types(X)
-    pre = ColumnTransformer([("num",StandardScaler(),num),
-                             ("cat",OneHotEncoder(handle_unknown="ignore"),cat)])
-    models = {
-        "Linear"       : LinearRegression(),
-        "Ridge"        : Ridge(),
-        "Lasso"        : Lasso(alpha=0.01),
-        "Decision Tree": DecisionTreeRegressor(max_depth=6,
-                                               random_state=RANDOM_STATE),
-    }
-    scores=[]
-    for n,m in models.items():
-        pipe = Pipeline([("prep",pre),("mdl",m)]).fit(X,y)
-        scores.append((n, round(pipe.score(X,y),3)))
-
-        if n in ("Linear","Ridge","Lasso"):
-            coefs = pd.DataFrame({"feature":pipe["prep"].get_feature_names_out(),
-                                  "coef":m.coef_})\
-                    .sort_values("coef", key=np.abs, ascending=False).head(10)
-            with st.expander(f"{n} – Top coefficients"):
-                st.plotly_chart(px.bar(coefs,x="coef",y="feature",orientation="h"),
-                                use_container_width=True)
-
-    st.table(pd.DataFrame(scores, columns=["Model","R²"]).set_index("Model"))
-
-    dt = Pipeline([("prep",pre),("mdl",models["Decision Tree"])]).fit(X,y)
-    preds = dt.predict(X)
-    st.plotly_chart(px.scatter(x=preds,y=y-preds,
-                               labels={"x":"Predicted","y":"Residual"},
-                               title="Residuals – Decision Tree"),
-                    use_container_width=True)
-
-# ──────────────── Tab 6 – Retention ─────────────────────────
-def tab_retention(df: pd.DataFrame) -> None:
-    st.header("⏳ 12-Month Retention Forecast")
-    alg = st.selectbox("Model",
-                       ["Logistic Regression","Random Forest","XGBoost"])
-    horizon = st.slider("Horizon (months)", 6, 24, 12)
-
-    if "YearsAtCompany" not in df:
-        st.error("Column `YearsAtCompany` missing.")
-        return
-
-    tmp          = df.copy()
-    tmp["Stay"]  = (tmp["YearsAtCompany"]*12 >= horizon).astype(int)
-    X,y          = tmp.drop(columns=["Stay"]), tmp["Stay"]
-    num,cat      = get_column_types(X)
-    pre = ColumnTransformer([("num",StandardScaler(),num),
-                             ("cat",OneHotEncoder(handle_unknown="ignore"),cat)])
-
-    if alg == "Logistic Regression":
-        mdl = LogisticRegression(max_iter=1000)
-    elif alg == "Random Forest":
-        mdl = RandomForestClassifier(n_estimators=400,
-                                     random_state=RANDOM_STATE)
-    else:
-        mdl = xgb.XGBClassifier(random_state=RANDOM_STATE,
-                                eval_metric="logloss",
-                                learning_rate=0.05,
-                                n_estimators=500,
-                                max_depth=5)
-
-    pipe = Pipeline([("prep",pre),("mdl",mdl)]).fit(X,y)
-    tmp["RetentionProb"] = pipe.predict_proba(X)[:,1]
-    st.dataframe(tmp[["EmployeeNumber","RetentionProb"]].head(),
-                 use_container_width=True)
-
-    # ---------- Feature importance ----------
-    st.subheader("Feature importance")
-    feat_names = pipe["prep"].get_feature_names_out()
-
-    if alg == "Logistic Regression":
-        importance = np.abs(mdl.coef_[0])
-    elif hasattr(mdl, "feature_importances_"):
-        importance = mdl.feature_importances_
-    else:  # fallback (rare)
-        X_trans = pipe["prep"].transform(X)
-        if hasattr(X_trans, "toarray"):
-            X_trans = X_trans.toarray()
-        explainer = shap.Explainer(mdl, X_trans)
-        shap_vals = explainer(X_trans[:200])
-        importance = np.abs(shap_vals.values).mean(axis=0)
-
-    # Align lengths if encoder truncated rare categories
-    if len(importance) != len(feat_names):
-        min_len = min(len(importance), len(feat_names))
-        importance = importance[:min_len]
-        feat_names = feat_names[:min_len]
-
-    imp_df = pd.DataFrame({"feature":feat_names,
-                           "importance":importance})\
-             .sort_values("importance", ascending=False).head(15)
-
-    st.plotly_chart(px.bar(imp_df, x="importance", y="feature",
-                           orientation="h"),
-                    use_container_width=True)
-
-    st.markdown(download_link(tmp[[
-        "EmployeeNumber","RetentionProb"]],
-        "retention_predictions.csv",
-        "📥 Download predictions"),
-        unsafe_allow_html=True)
-
-# ─────────────────────────── Main ───────────────────────────
-def main() -> None:
-    st.sidebar.title("📂 Data Source")
-    upload = st.sidebar.file_uploader("Upload HR Analytics CSV", type="csv")
-    df     = universal_filters(load_data(upload))
-
-    st.sidebar.download_button("Download filtered CSV",
-                               df.to_csv(index=False).encode(),
-                               "filtered_data.csv", "text/csv")
-
-    tabs = st.tabs(["Visualisation","Classification","Clustering",
-                    "Association Rules","Regression","12-Month Forecast"])
-
-    with tabs[0]: tab_visualisation(df)
-    with tabs[1]: tab_classification(df)
-    with tabs[2]: tab_clustering(df)
-    with tabs[3]: tab_association(df)
-    with tabs[4]: tab_regression(df)
-    with tabs[5]: tab_retention(df)
-
-# ──────────────────────────── Run ───────────────────────────
-if __name__ == "__main__":
-    main()
+st.markdown("---")
+st.caption("Enhanced HR Analytics Dashboard | Streamlit & scikit-learn")
