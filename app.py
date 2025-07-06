@@ -261,6 +261,7 @@ def tab_classification(df: pd.DataFrame) -> None:
                            df_new.to_csv(index=False).encode(),
                            "predictions.csv", "text/csv")
 
+
 # ──────────────── Tab 3 – Clustering ────────────────────────
 def tab_clustering(df: pd.DataFrame) -> None:
     st.header("🕵️‍♀️ Clustering")
