@@ -2,7 +2,10 @@ streamlit
 pandas
 numpy
 scikit-learn
+matplotlib
+seaborn
 plotly
 mlxtend
 shap
 xgboost
+openpyxl
