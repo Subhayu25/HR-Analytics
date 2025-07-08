@@ -107,41 +107,79 @@ def tab_visualisation(df: pd.DataFrame) -> None:
     st.header("📊 Data Visualization")
     numeric, categorical = get_column_types(df)
 
-    with st.expander("Attrition % by Department"):
-        perc = (pd.crosstab(df["Department"], df[TARGET_CLASSIFICATION],
-                            normalize="index") * 100).reset_index()
-        st.plotly_chart(px.bar(perc, x="Department", y="Yes",
-                               labels={"Yes": "Attrition %"}),
-                        use_container_width=True)
+    # 1) Attrition % by Department
+    if "Department" in df.columns and TARGET_CLASSIFICATION in df.columns:
+        with st.expander("Attrition % by Department"):
+            perc = (pd.crosstab(
+                        df["Department"],
+                        df[TARGET_CLASSIFICATION],
+                        normalize="index"
+                    ) * 100).reset_index()
+            st.plotly_chart(
+                px.bar(perc, x="Department", y="Yes", labels={"Yes":"Attrition %"}),
+                use_container_width=True
+            )
+    else:
+        st.warning("⚠️ Skipping ‘Attrition % by Department’ – columns not found.")
 
-    with st.expander("Age Distribution"):
-        st.plotly_chart(px.histogram(df, x="Age", color=TARGET_CLASSIFICATION,
-                                     nbins=30, barmode="overlay"),
-                        use_container_width=True)
+    # 2) Age Distribution
+    if "Age" in df.columns and TARGET_CLASSIFICATION in df.columns:
+        with st.expander("Age Distribution"):
+            st.plotly_chart(
+                px.histogram(df, x="Age", color=TARGET_CLASSIFICATION,
+                             nbins=30, barmode="overlay"),
+                use_container_width=True
+            )
+    else:
+        st.warning("⚠️ Skipping ‘Age Distribution’ – columns not found.")
 
-    with st.expander("Monthly Income vs Job Level"):
-        st.plotly_chart(px.violin(df, x="JobLevel", y="MonthlyIncome",
-                                  color=TARGET_CLASSIFICATION,
-                                  box=True, points="outliers"),
-                        use_container_width=True)
+    # 3) Monthly Income vs JobLevel
+    if "JobLevel" in df.columns and "MonthlyIncome" in df.columns:
+        with st.expander("Monthly Income vs Job Level"):
+            st.plotly_chart(
+                px.violin(
+                    df, x="JobLevel", y="MonthlyIncome",
+                    color=TARGET_CLASSIFICATION, box=True, points="outliers"
+                ),
+                use_container_width=True
+            )
+    else:
+        st.warning("⚠️ Skipping ‘Monthly Income vs Job Level’ – columns not found.")
 
-    with st.expander("Correlation Heat-map"):
-        st.plotly_chart(px.imshow(df[numeric].corr(), text_auto=".2f"),
-                        use_container_width=True)
+    # 4) Correlation heatmap (only numeric cols)
+    if len(numeric) >= 2:
+        with st.expander("Correlation Heat-map"):
+            st.plotly_chart(
+                px.imshow(df[numeric].corr(), text_auto=".2f"),
+                use_container_width=True
+            )
+    else:
+        st.warning("⚠️ Skipping ‘Correlation Heat-map’ – not enough numeric columns.")
 
-    count = 4
+    # 5) Auto generated countplots for up to 8 categoricals
     for col in categorical[:8]:
-        with st.expander(f"Countplot – {col}"):
-            st.plotly_chart(px.histogram(df, x=col, color=TARGET_CLASSIFICATION,
-                                         barmode="group"),
-                            use_container_width=True)
-            count += 1
+        if col in df.columns and TARGET_CLASSIFICATION in df.columns:
+            with st.expander(f"Countplot – {col}"):
+                st.plotly_chart(
+                    px.histogram(df, x=col, color=TARGET_CLASSIFICATION,
+                                 barmode="group"),
+                    use_container_width=True
+                )
+        else:
+            st.warning(f"⚠️ Skipping Countplot – {col}")
+
+    # 6) Auto generated boxplots for up to 8 numerics
     for col in numeric[:8]:
-        with st.expander(f"Boxplot – {col} by Attrition"):
-            st.plotly_chart(px.box(df, y=col, color=TARGET_CLASSIFICATION),
-                            use_container_width=True)
-            count += 1
-    st.success(f"Rendered **{count}** visual insights.")
+        if col in df.columns and TARGET_CLASSIFICATION in df.columns:
+            with st.expander(f"Boxplot – {col} by {TARGET_CLASSIFICATION}"):
+                st.plotly_chart(
+                    px.box(df, y=col, color=TARGET_CLASSIFICATION),
+                    use_container_width=True
+                )
+        else:
+            st.warning(f"⚠️ Skipping Boxplot – {col}")
+
+    st.success("✅ Finished rendering available visual insights.")
 
 # ──────────────── Tab 2 – Classification ───────────────────
 def preprocess(df: pd.DataFrame, target: str):
