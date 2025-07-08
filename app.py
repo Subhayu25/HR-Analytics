@@ -45,8 +45,7 @@ st.set_page_config(
 
 # ───────────────────── Constants ─────────────────────────
 GITHUB_URL            = (
-    "https://raw.githubusercontent.com/your-username/your-repo/"
-    "main/HR%20Analytics.csv"
+    "https://raw.githubusercontent.com/Subhayu25/HR-Analytics/refs/heads/main/Hr%20Analytics.csv"
 )
 TARGET_CLASSIFICATION = "Attrition"
 DEFAULT_REG_TARGET    = "MonthlyIncome"
